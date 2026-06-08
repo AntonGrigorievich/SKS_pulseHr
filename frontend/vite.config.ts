@@ -6,16 +6,11 @@ export default defineConfig({
   server: {
     port: 5173,
     proxy: {
-      "/api": "http://localhost:8000",
-      "/auth": "http://localhost:8000",
-      "/users": "http://localhost:8000",
-      "/surveys": "http://localhost:8000",
-      "/employee": "http://localhost:8000",
-      "/responses": "http://localhost:8000",
-      "/analytics": "http://localhost:8000",
-      "/notifications": "http://localhost:8000",
-      "/exports": "http://localhost:8000"
-    }
-  }
+      "^/(api|auth|users|surveys|employee|responses|analytics|notifications|exports)": {
+        target: "http://pulsehr-api:8000", // или http://pulsehr-backend:8000 в Docker
+        changeOrigin: true,
+        secure: false,
+      },
+    },
+  },
 });
-

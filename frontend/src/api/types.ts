@@ -1,6 +1,16 @@
 export type Role = "HR" | "EMPLOYEE";
 export type SurveyStatus = "DRAFT" | "PUBLISHED" | "CLOSED" | "ARCHIVED";
 export type QuestionType = "SINGLE_CHOICE" | "MULTIPLE_CHOICE" | "RATING" | "TEXT" | "MATRIX";
+export type BranchOperator = "equals" | "lte" | "gte" | "in";
+
+export interface BlueprintPosition {
+  x: number;
+  y: number;
+}
+
+export interface QuestionBlueprintSettings {
+  position?: BlueprintPosition;
+}
 
 export interface TokenPair {
   access_token: string;
@@ -33,7 +43,7 @@ export interface Question {
   type: QuestionType;
   position: number;
   is_required: boolean;
-  settings: Record<string, unknown>;
+  settings: Record<string, unknown> & { blueprint?: QuestionBlueprintSettings };
   options: QuestionOption[];
 }
 
@@ -56,4 +66,3 @@ export interface EmployeeSurveyCard extends Survey {
   anonymity_notice: string;
   completion_percent: number;
 }
-

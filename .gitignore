@@ -228,5 +228,9 @@ venv/
 .env.local
 postgres_data/
 redis_data/
+node_modules/
+frontend/node_modules/
+*.tsbuildinfo
 .DS_Store
 
+instruction.md

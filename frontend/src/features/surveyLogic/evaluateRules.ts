@@ -12,10 +12,14 @@ function readPath(source: Record<string, unknown>, path: string): unknown {
 }
 
 function compare(actual: unknown, operator: string, expected: unknown): boolean {
-  if (operator === "equals") return actual === expected;
+  if (operator === "equals") return Array.isArray(actual) ? actual.includes(expected) : actual === expected;
   if (operator === "lte") return Number(actual) <= Number(expected);
   if (operator === "gte") return Number(actual) >= Number(expected);
-  if (operator === "in") return Array.isArray(expected) && expected.includes(actual);
+  if (operator === "in") {
+    if (Array.isArray(actual) && Array.isArray(expected)) return actual.some((item) => expected.includes(item));
+    if (Array.isArray(actual)) return actual.includes(expected);
+    if (Array.isArray(expected)) return expected.includes(actual);
+  }
   return false;
 }
 
@@ -51,4 +55,3 @@ export function visibleQuestions(questions: Question[], rules: SurveyRule[], ans
     })
     .sort((a, b) => a.position - b.position);
 }
-
