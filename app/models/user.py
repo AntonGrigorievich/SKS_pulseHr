@@ -3,7 +3,7 @@ from __future__ import annotations
 import enum
 import uuid
 
-from sqlalchemy import Enum, String
+from sqlalchemy import Boolean, Enum, String
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -23,6 +23,8 @@ class User(TimestampMixin, Base):
     full_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
     role: Mapped[Role] = mapped_column(Enum(Role, name="role"), default=Role.EMPLOYEE, nullable=False)
     department: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    position: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
 
     refresh_tokens = relationship(
         "RefreshToken",
@@ -30,4 +32,7 @@ class User(TimestampMixin, Base):
         cascade="all, delete-orphan",
         passive_deletes=True,
     )
-
+    created_surveys = relationship("Survey", back_populates="created_by")
+    survey_assignments = relationship("SurveyAssignment", back_populates="user")
+    survey_responses = relationship("SurveyResponse", back_populates="user")
+    notification_settings = relationship("NotificationSettings", back_populates="user", uselist=False)

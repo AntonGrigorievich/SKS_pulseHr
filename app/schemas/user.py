@@ -13,6 +13,8 @@ class UserBase(BaseModel):
     full_name: str | None = Field(default=None, max_length=255, examples=["Ivan Petrov"])
     role: Role = Role.EMPLOYEE
     department: str | None = Field(default=None, max_length=255, examples=["Engineering"])
+    position: str | None = Field(default=None, max_length=255, examples=["Team Lead"])
+    is_active: bool = True
 
 
 class UserCreate(UserBase):
@@ -24,6 +26,8 @@ class UserUpdate(BaseModel):
     full_name: str | None = Field(default=None, max_length=255)
     role: Role | None = None
     department: str | None = Field(default=None, max_length=255)
+    position: str | None = Field(default=None, max_length=255)
+    is_active: bool | None = None
 
 
 class UserRead(UserBase):
@@ -32,4 +36,3 @@ class UserRead(UserBase):
     id: UUID
     created_at: datetime
     updated_at: datetime
-
