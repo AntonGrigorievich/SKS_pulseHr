@@ -49,7 +49,7 @@ async def update_user(
     return await service.update(session, user_id, payload)
 
 
-@router.delete("/{user_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete("/{user_id}")
 async def delete_user(
     user_id: UUID,
     session: AsyncSessionDep,

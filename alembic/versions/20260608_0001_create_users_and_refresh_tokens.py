@@ -15,11 +15,21 @@ down_revision = None
 branch_labels = None
 depends_on = None
 
-role_enum = postgresql.ENUM("HR", "EMPLOYEE", name="role")
+role_enum = postgresql.ENUM("HR", "EMPLOYEE", name="role", create_type=False)
 
 
 def upgrade() -> None:
-    role_enum.create(op.get_bind(), checkfirst=True)
+    op.execute(
+        """
+        DO $$
+        BEGIN
+            CREATE TYPE role AS ENUM ('HR', 'EMPLOYEE');
+        EXCEPTION
+            WHEN duplicate_object THEN NULL;
+        END
+        $$;
+        """
+    )
 
     op.create_table(
         "users",
