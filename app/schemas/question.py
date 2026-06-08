@@ -28,6 +28,9 @@ class QuestionCreate(BaseModel):
     type: QuestionType
     position: int = Field(ge=0)
     is_required: bool = True
+    position_x: float = 0.0
+    position_y: float = 0.0
+    is_start_node: bool = False
     settings: dict = Field(default_factory=dict)
     options: list[QuestionOptionCreate] = Field(default_factory=list)
 
@@ -38,6 +41,9 @@ class QuestionUpdate(BaseModel):
     type: QuestionType | None = None
     position: int | None = Field(default=None, ge=0)
     is_required: bool | None = None
+    position_x: float | None = None
+    position_y: float | None = None
+    is_start_node: bool | None = None
     settings: dict | None = None
     options: list[QuestionOptionCreate] | None = None
 
@@ -52,6 +58,9 @@ class QuestionRead(BaseModel):
     type: QuestionType
     position: int
     is_required: bool
+    position_x: float
+    position_y: float
+    is_start_node: bool
     settings: dict
     options: list[QuestionOptionRead] = []
     created_at: datetime
@@ -65,4 +74,3 @@ class QuestionReorderItem(BaseModel):
 
 class QuestionReorderRequest(BaseModel):
     items: list[QuestionReorderItem]
-

@@ -33,6 +33,9 @@ export interface Question {
   type: QuestionType;
   position: number;
   is_required: boolean;
+  position_x: number;
+  position_y: number;
+  is_start_node: boolean;
   settings: Record<string, unknown>;
   options: QuestionOption[];
 }
