@@ -46,7 +46,10 @@ class QuestionService:
             )
         await session.commit()
         await session.refresh(question)
-        return question
+        updated = await self.question_repository.get(session, question_id)
+        if updated is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Question not found")
+        return updated
 
     async def delete(self, session: AsyncSession, question_id: UUID) -> None:
         question = await self.question_repository.get(session, question_id)
@@ -69,4 +72,3 @@ class QuestionService:
 
 def get_question_service() -> QuestionService:
     return QuestionService(SurveyRepository(), QuestionRepository())
-

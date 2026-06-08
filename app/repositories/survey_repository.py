@@ -70,7 +70,10 @@ class QuestionRepository:
         session.add(question)
         await session.flush()
         await session.refresh(question)
-        return question
+        created = await self.get(session, question.id)
+        if created is None:
+            raise RuntimeError("Created question was not found")
+        return created
 
     async def replace_options(
         self,
