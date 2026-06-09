@@ -1,6 +1,7 @@
 import {
   DeleteOutlined,
   EditOutlined,
+  EyeInvisibleOutlined,
   LinkOutlined,
   PlusOutlined,
   SaveOutlined
@@ -51,6 +52,7 @@ import {
   Question,
   QuestionOption,
   QuestionType,
+  Survey,
   SurveyDetail,
   SurveyRule
 } from "../../api/types";
@@ -507,6 +509,14 @@ export function SurveyBuilderPage() {
       apiRequest(`/surveys/${surveyId}/questions/reorder`, { method: "POST", body: JSON.stringify({ items }) }),
     onSuccess: () => invalidateSurvey()
   });
+  const makeAnonymous = useMutation({
+    mutationFn: () =>
+      apiRequest<Survey>(`/surveys/${surveyId}`, { method: "PATCH", body: JSON.stringify({ is_anonymous: true }) }),
+    onSuccess: () => {
+      message.success("Survey is anonymous");
+      invalidateSurvey();
+    }
+  });
   const createRule = useMutation({
     mutationFn: (payload: Record<string, unknown>) =>
       apiRequest<SurveyRule>(`/surveys/${surveyId}/rules`, { method: "POST", body: JSON.stringify(payload) }),
@@ -798,9 +808,22 @@ export function SurveyBuilderPage() {
       <div className="toolbar">
         <div>
           <Typography.Title level={2} style={{ margin: 0 }}>{data?.title}</Typography.Title>
-          <Typography.Text type="secondary">Survey builder</Typography.Text>
+          <Space size={8}>
+            <Typography.Text type="secondary">Survey builder</Typography.Text>
+            {data?.is_anonymous && <Tag color="green">Anonymous</Tag>}
+          </Space>
         </div>
-        <Button type="primary" icon={<PlusOutlined />} onClick={() => openQuestionModal()}>Add question</Button>
+        <Space>
+          <Button
+            icon={<EyeInvisibleOutlined />}
+            onClick={() => makeAnonymous.mutate()}
+            loading={makeAnonymous.isPending}
+            disabled={!surveyId || data?.is_anonymous}
+          >
+            Make anon
+          </Button>
+          <Button type="primary" icon={<PlusOutlined />} onClick={() => openQuestionModal()}>Add question</Button>
+        </Space>
       </div>
       <Tabs
         items={[
