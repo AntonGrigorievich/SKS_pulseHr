@@ -1,0 +1,91 @@
+{% extends "sqladmin/base.html" %}
+{% block body %}
+<div class="d-flex align-items-center justify-content-center vh-100">
+  <form class="Fcol-lg-6 col-md-6 card card-md" action="{{ url_for('admin:login') }}" method="POST" autocomplete="off">
+    <div class="card-body">
+      <h2 class="card-title text-center mb-4">Login to {{ admin.title }}</h2>
+      <div class="mb-3">
+        <label class="form-label">Phone</label>
+        {% if error %}
+        <input id="admin-phone" name="username" type="tel" class="form-control is-invalid" placeholder="Enter phone"
+          autocomplete="off">
+        <div class="invalid-feedback">{{ error }}</div>
+        {% else %}
+        <input id="admin-phone" name="username" type="tel" class="form-control" placeholder="Enter phone" autocomplete="off">
+        {% endif %}
+      </div>
+      <div class="mb-3">
+        <button id="admin-send-code" type="button" class="btn btn-outline-primary w-100"
+          data-send-code-url="{{ url_for('admin:send_code') }}">Send code</button>
+        <div id="admin-send-code-feedback" class="form-hint mt-2" role="status" aria-live="polite"></div>
+      </div>
+      <div class="mb-2">
+        <label class="form-label">
+          OTP code
+        </label>
+        <div class="input-group input-group-flat">
+          {% if error %}
+          <input name="password" type="text" class="form-control is-invalid" placeholder="Enter code"
+            autocomplete="one-time-code" inputmode="numeric" maxlength="6">
+          <div class="invalid-feedback">{{ error }}</div>
+          {% else %}
+          <input name="password" type="text" class="form-control" placeholder="Enter code"
+            autocomplete="one-time-code" inputmode="numeric" maxlength="6">
+          {% endif %}
+        </div>
+      </div>
+      <div class="form-footer">
+        <button type="submit" class="btn btn-primary w-100">Login</button>
+      </div>
+    </div>
+  </form>
+</div>
+<script>
+  const phoneInput = document.getElementById("admin-phone");
+  const sendCodeButton = document.getElementById("admin-send-code");
+  const feedback = document.getElementById("admin-send-code-feedback");
+
+  function showFeedback(message, isError) {
+    feedback.textContent = message;
+    feedback.classList.toggle("text-danger", isError);
+    feedback.classList.toggle("text-success", !isError);
+  }
+
+  sendCodeButton.addEventListener("click", async () => {
+    const phone = phoneInput.value.trim();
+    if (!phone) {
+      showFeedback("Enter phone first.", true);
+      phoneInput.focus();
+      return;
+    }
+
+    sendCodeButton.disabled = true;
+    const originalText = sendCodeButton.textContent;
+    sendCodeButton.textContent = "Sending...";
+
+    try {
+      const response = await fetch(sendCodeButton.dataset.sendCodeUrl, {
+        method: "POST",
+        headers: {
+          "Accept": "application/json",
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({ phone })
+      });
+      const data = await response.json().catch(() => ({}));
+
+      if (!response.ok) {
+        showFeedback(data.detail || "Could not send code.", true);
+        return;
+      }
+
+      showFeedback(data.message || "OTP code generated.", false);
+    } catch {
+      showFeedback("Could not send code.", true);
+    } finally {
+      sendCodeButton.disabled = false;
+      sendCodeButton.textContent = originalText;
+    }
+  });
+</script>
+{% endblock %}

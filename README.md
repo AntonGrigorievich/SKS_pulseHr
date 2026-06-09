@@ -8,6 +8,7 @@ roles, anonymous survey responses, analytics, notifications, and CSV/XLSX export
 - Python 3.12
 - FastAPI
 - SQLAlchemy 2.0 Async
+- SQLAdmin
 - PostgreSQL
 - Alembic
 - Redis
@@ -32,6 +33,15 @@ OpenAPI docs:
 ```text
 http://localhost:8000/docs
 ```
+
+Admin panel:
+
+```text
+http://localhost:8000/admin
+```
+
+The SQLAdmin panel uses the same OTP flow as the API. Request an OTP for an existing
+HR user, then log in to `/admin` with the phone as the username and OTP as the password.
 
 Health check:
 

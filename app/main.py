@@ -4,6 +4,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
+from app.admin import setup_admin
 from app.api.router import api_router
 from app.core.config import settings
 from app.db.redis import close_redis
@@ -27,5 +28,5 @@ async def health() -> dict[str, str]:
     return {"status": "ok"}
 
 
+setup_admin(app)
 app.include_router(api_router, prefix=settings.api_prefix)
-
