@@ -25,6 +25,16 @@ body {
   gap: 16px;
 }
 
+.analytics-stat-grid {
+  margin-bottom: 16px;
+}
+
+.analytics-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1.5fr) minmax(280px, 0.8fr);
+  gap: 16px;
+}
+
 .question-row {
   margin-bottom: 16px;
 }
@@ -129,10 +139,8 @@ body {
   display: flex;
   flex-direction: column;
   gap: 8px;
-  max-height: 142px;
   margin-top: 10px;
-  overflow: auto;
-  padding-right: 6px;
+  overflow: visible;
 }
 
 .rule-node-output {
@@ -203,6 +211,10 @@ body {
 }
 
 @media (max-width: 980px) {
+  .analytics-layout {
+    grid-template-columns: 1fr;
+  }
+
   .blueprint-shell {
     grid-template-columns: 1fr;
     grid-template-rows: auto 560px auto;

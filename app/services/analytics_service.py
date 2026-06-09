@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections import Counter, defaultdict
 from uuid import UUID
 
-from sqlalchemy import func, select
+from sqlalchemy import case, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.notification import DeliveryStatus, NotificationDelivery
@@ -43,13 +43,18 @@ class AnalyticsService:
         }
 
     async def department_analytics(self, session: AsyncSession, survey_id: UUID) -> list[dict]:
+        department_label = case(
+            (SurveyResponse.user_id.is_(None), "Anonymous"),
+            else_=func.coalesce(User.department, "Unknown"),
+        ).label("department")
         result = await session.execute(
-            select(User.department, func.count(SurveyResponse.id))
-            .join(SurveyResponse, SurveyResponse.user_id == User.id)
+            select(department_label, func.count(SurveyResponse.id))
+            .select_from(SurveyResponse)
+            .outerjoin(User, SurveyResponse.user_id == User.id)
             .where(SurveyResponse.survey_id == survey_id, SurveyResponse.status == ResponseStatus.SUBMITTED)
-            .group_by(User.department)
+            .group_by(department_label)
         )
-        return [{"label": department or "Unknown", "value": float(count)} for department, count in result.all()]
+        return [{"label": department, "value": float(count)} for department, count in result.all()]
 
     async def timeline(self, session: AsyncSession, survey_id: UUID) -> list[dict]:
         result = await session.execute(
@@ -78,53 +83,78 @@ class AnalyticsService:
         }
 
     async def _global_completion_rate(self, session: AsyncSession) -> float:
-        total = await session.scalar(select(func.count()).select_from(SurveyAssignment))
-        submitted = await session.scalar(
-            select(func.count()).select_from(SurveyAssignment).where(SurveyAssignment.status == AssignmentStatus.SUBMITTED)
-        )
-        return round(((submitted or 0) / total) * 100, 2) if total else 0.0
+        total, submitted = await self._assignment_counts(session)
+        return self._percentage(submitted, total)
 
     async def _global_response_rate(self, session: AsyncSession) -> float:
-        total = await session.scalar(select(func.count()).select_from(SurveyResponse))
-        submitted = await session.scalar(
-            select(func.count()).select_from(SurveyResponse).where(SurveyResponse.status == ResponseStatus.SUBMITTED)
-        )
-        return round(((submitted or 0) / total) * 100, 2) if total else 0.0
+        return await self._response_rate(session)
 
     async def _survey_completion_rate(self, session: AsyncSession, survey_id: UUID) -> float:
-        total = await session.scalar(
-            select(func.count()).select_from(SurveyAssignment).where(SurveyAssignment.survey_id == survey_id)
-        )
-        submitted = await session.scalar(
-            select(func.count())
-            .select_from(SurveyAssignment)
-            .where(SurveyAssignment.survey_id == survey_id, SurveyAssignment.status == AssignmentStatus.SUBMITTED)
-        )
-        return round(((submitted or 0) / total) * 100, 2) if total else 0.0
+        total, submitted = await self._assignment_counts(session, survey_id)
+        return self._percentage(submitted, total)
 
     async def _survey_response_rate(self, session: AsyncSession, survey_id: UUID) -> float:
+        return await self._response_rate(session, survey_id)
+
+    async def _assignment_counts(
+        self,
+        session: AsyncSession,
+        survey_id: UUID | None = None,
+    ) -> tuple[int, int]:
+        total_stmt = select(func.count()).select_from(SurveyAssignment)
+        submitted_stmt = (
+            select(func.count())
+            .select_from(SurveyAssignment)
+            .where(SurveyAssignment.status == AssignmentStatus.SUBMITTED)
+        )
+        if survey_id is not None:
+            total_stmt = total_stmt.where(SurveyAssignment.survey_id == survey_id)
+            submitted_stmt = submitted_stmt.where(SurveyAssignment.survey_id == survey_id)
+
+        total = await session.scalar(total_stmt)
+        submitted = await session.scalar(submitted_stmt)
+        return int(total or 0), int(submitted or 0)
+
+    async def _response_rate(self, session: AsyncSession, survey_id: UUID | None = None) -> float:
+        assigned_total, assigned_submitted = await self._assignment_counts(session, survey_id)
+        if assigned_total:
+            return self._percentage(assigned_submitted, assigned_total)
+
         total = await session.scalar(
-            select(func.count()).select_from(SurveyResponse).where(SurveyResponse.survey_id == survey_id)
+            self._response_count_stmt(survey_id=survey_id)
         )
         submitted = await session.scalar(
-            select(func.count())
-            .select_from(SurveyResponse)
-            .where(SurveyResponse.survey_id == survey_id, SurveyResponse.status == ResponseStatus.SUBMITTED)
+            self._response_count_stmt(survey_id=survey_id, submitted_only=True)
         )
-        return round(((submitted or 0) / total) * 100, 2) if total else 0.0
+        return self._percentage(int(submitted or 0), int(total or 0))
+
+    @staticmethod
+    def _response_count_stmt(survey_id: UUID | None = None, *, submitted_only: bool = False):
+        stmt = select(func.count()).select_from(SurveyResponse)
+        if survey_id is not None:
+            stmt = stmt.where(SurveyResponse.survey_id == survey_id)
+        if submitted_only:
+            stmt = stmt.where(SurveyResponse.status == ResponseStatus.SUBMITTED)
+        return stmt
+
+    @staticmethod
+    def _percentage(numerator: int, denominator: int) -> float:
+        return round((numerator / denominator) * 100, 2) if denominator else 0.0
 
     async def _enps(self, session: AsyncSession, survey_id: UUID | None = None) -> float | None:
         stmt = (
-            select(Answer.value)
+            select(Answer.value, Question.settings)
             .join(Question, Question.id == Answer.question_id)
             .join(SurveyResponse, SurveyResponse.id == Answer.response_id)
-            .where(Question.settings["enps"].as_boolean().is_(True), SurveyResponse.status == ResponseStatus.SUBMITTED)
+            .where(SurveyResponse.status == ResponseStatus.SUBMITTED)
         )
         if survey_id is not None:
             stmt = stmt.where(SurveyResponse.survey_id == survey_id)
         result = await session.execute(stmt)
         scores = []
-        for (value,) in result.all():
+        for value, settings in result.all():
+            if not isinstance(settings, dict) or settings.get("enps") is not True:
+                continue
             score = value.get("score") if isinstance(value, dict) else None
             if isinstance(score, (int, float)):
                 scores.append(score)

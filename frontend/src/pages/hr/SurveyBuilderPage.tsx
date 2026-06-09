@@ -83,6 +83,7 @@ type QuestionFormValues = {
   is_required: boolean;
   options?: QuestionOption[];
   max?: number;
+  is_enps?: boolean;
   rowsText?: string;
   columnsText?: string;
 };
@@ -240,6 +241,9 @@ function buildSettings(values: QuestionFormValues, existing?: Question): Record<
   const settings = { ...getQuestionSettings(existing) };
   if (values.type === "RATING") {
     settings.max = values.max ?? Number(settings.max ?? 10);
+    settings.enps = Boolean(values.is_enps);
+  } else {
+    delete settings.enps;
   }
   if (values.type === "MATRIX") {
     settings.rows = splitLines(values.rowsText) || ((settings.rows as string[] | undefined) ?? []);
@@ -442,6 +446,10 @@ function formatRuleSummary(questions: Question[], rule: SurveyRule) {
   return `${actionLabel(rule.action)} "${target?.title ?? "target"}" when "${source?.title ?? "source"}" ${operatorLabel(parsed.operator)} ${formatRuleValue(parsed.value)}`;
 }
 
+function getErrorMessage(error: unknown) {
+  return error instanceof Error ? error.message : "Request failed";
+}
+
 function getInitialQuestionValues(question?: Question): Partial<QuestionFormValues> {
   const settings = getQuestionSettings(question);
   return {
@@ -451,6 +459,7 @@ function getInitialQuestionValues(question?: Question): Partial<QuestionFormValu
     is_required: question?.is_required ?? true,
     options: getQuestionOptions(question).length ? getQuestionOptions(question) : [{ label: "Yes", value: "yes", position: 0 }],
     max: Number(settings.max ?? 10),
+    is_enps: Boolean(settings.enps),
     rowsText: ((settings.rows as string[] | undefined) ?? []).join("\n"),
     columnsText: ((settings.columns as string[] | undefined) ?? ["1", "2", "3", "4", "5"]).join("\n")
   };
@@ -465,6 +474,7 @@ export function SurveyBuilderPage() {
   const [connectionDraft, setConnectionDraft] = useState<ConnectionDraft | null>(null);
   const [flowNodes, setFlowNodes] = useState<QuestionFlowNode[]>([]);
   const [selectedRuleId, setSelectedRuleId] = useState<string | null>(null);
+  const [pendingNodePositions, setPendingNodePositions] = useState<Record<string, BlueprintPosition>>({});
   const [questionForm] = Form.useForm<QuestionFormValues>();
   const [ruleForm] = Form.useForm<RuleFormValues>();
   const queryClient = useQueryClient();
@@ -480,6 +490,10 @@ export function SurveyBuilderPage() {
     () => (data?.rules ?? []).map((rule) => ({ rule, parsed: parseRule(rule) })).filter((item) => item.parsed),
     [data?.rules]
   );
+  const pendingPositionCount = useMemo(
+    () => Object.keys(pendingNodePositions).filter((questionId) => questionIds.has(questionId)).length,
+    [pendingNodePositions, questionIds]
+  );
 
   const invalidateSurvey = () => queryClient.invalidateQueries({ queryKey: ["survey-detail", surveyId] });
   const createQuestion = useMutation({
@@ -489,7 +503,8 @@ export function SurveyBuilderPage() {
       setQuestionModalOpen(false);
       setEditingQuestion(null);
       invalidateSurvey();
-    }
+    },
+    onError: (error) => message.error(getErrorMessage(error))
   });
   const updateQuestion = useMutation({
     mutationFn: ({ id, payload }: { id: string; payload: Record<string, unknown> }) =>
@@ -498,16 +513,19 @@ export function SurveyBuilderPage() {
       setQuestionModalOpen(false);
       setEditingQuestion(null);
       invalidateSurvey();
-    }
+    },
+    onError: (error) => message.error(getErrorMessage(error))
   });
   const deleteQuestion = useMutation({
     mutationFn: (id: string) => apiRequest(`/questions/${id}`, { method: "DELETE" }),
-    onSuccess: () => invalidateSurvey()
+    onSuccess: () => invalidateSurvey(),
+    onError: (error) => message.error(getErrorMessage(error))
   });
   const reorder = useMutation({
     mutationFn: (items: { id: string; position: number }[]) =>
       apiRequest(`/surveys/${surveyId}/questions/reorder`, { method: "POST", body: JSON.stringify({ items }) }),
-    onSuccess: () => invalidateSurvey()
+    onSuccess: () => invalidateSurvey(),
+    onError: (error) => message.error(getErrorMessage(error))
   });
   const makeAnonymous = useMutation({
     mutationFn: () =>
@@ -515,41 +533,87 @@ export function SurveyBuilderPage() {
     onSuccess: () => {
       message.success("Survey is anonymous");
       invalidateSurvey();
-    }
+    },
+    onError: (error) => message.error(getErrorMessage(error))
+  });
+  const saveSurveyLayout = useMutation({
+    mutationFn: async (positions: Record<string, BlueprintPosition>) => {
+      const updates = Object.entries(positions)
+        .map(([questionId, position]) => {
+          const question = questions.find((item) => item.id === questionId);
+          return question ? { question, position } : null;
+        })
+        .filter((item): item is { question: Question; position: BlueprintPosition } => Boolean(item));
+
+      await Promise.all(
+        updates.map(({ question, position }) =>
+          apiRequest<Question>(`/questions/${question.id}`, {
+            method: "PATCH",
+            body: JSON.stringify({ settings: withBlueprintPosition(getQuestionSettings(question), position) })
+          })
+        )
+      );
+      return updates.length;
+    },
+    onSuccess: (savedCount) => {
+      setPendingNodePositions({});
+      message.success(savedCount ? "Survey saved" : "No survey changes to save");
+      invalidateSurvey();
+      queryClient.invalidateQueries({ queryKey: ["surveys"] });
+    },
+    onError: (error) => message.error(getErrorMessage(error))
   });
   const createRule = useMutation({
     mutationFn: (payload: Record<string, unknown>) =>
       apiRequest<SurveyRule>(`/surveys/${surveyId}/rules`, { method: "POST", body: JSON.stringify(payload) }),
-    onSuccess: () => {
+    onSuccess: (createdRule) => {
+      queryClient.setQueryData<SurveyDetail>(["survey-detail", surveyId], (current) =>
+        current ? { ...current, rules: [...current.rules.filter((rule) => rule.id !== createdRule.id), createdRule] } : current
+      );
+      setSelectedRuleId(createdRule.id);
       setRuleModalOpen(false);
       setConnectionDraft(null);
+      message.success("Rule saved");
       invalidateSurvey();
-    }
+    },
+    onError: (error) => message.error(getErrorMessage(error))
   });
   const updateRule = useMutation({
     mutationFn: ({ id, payload }: { id: string; payload: Record<string, unknown> }) =>
       apiRequest<SurveyRule>(`/rules/${id}`, { method: "PATCH", body: JSON.stringify(payload) }),
-    onSuccess: () => {
+    onSuccess: (updatedRule) => {
+      queryClient.setQueryData<SurveyDetail>(["survey-detail", surveyId], (current) =>
+        current
+          ? { ...current, rules: current.rules.map((rule) => (rule.id === updatedRule.id ? updatedRule : rule)) }
+          : current
+      );
+      setSelectedRuleId(updatedRule.id);
       setRuleModalOpen(false);
       setEditingRule(null);
       setConnectionDraft(null);
+      message.success("Rule saved");
       invalidateSurvey();
-    }
+    },
+    onError: (error) => message.error(getErrorMessage(error))
   });
   const deleteRule = useMutation({
     mutationFn: (id: string) => apiRequest(`/rules/${id}`, { method: "DELETE" }),
-    onSuccess: () => {
+    onSuccess: (_data, deletedRuleId) => {
+      queryClient.setQueryData<SurveyDetail>(["survey-detail", surveyId], (current) =>
+        current ? { ...current, rules: current.rules.filter((rule) => rule.id !== deletedRuleId) } : current
+      );
       setRuleModalOpen(false);
       setEditingRule(null);
       setConnectionDraft(null);
+      setSelectedRuleId(null);
+      message.success("Rule deleted");
       invalidateSurvey();
-    }
+    },
+    onError: (error) => message.error(getErrorMessage(error))
   });
 
   const deleteQuestionMutateRef = useRef(deleteQuestion.mutate);
-  const updateQuestionMutateRef = useRef(updateQuestion.mutate);
   deleteQuestionMutateRef.current = deleteQuestion.mutate;
-  updateQuestionMutateRef.current = updateQuestion.mutate;
 
   const openQuestionModal = useCallback((question?: Question) => {
     setEditingQuestion(question ?? null);
@@ -659,11 +723,19 @@ export function SurveyBuilderPage() {
     (_event: MouseEvent | TouchEvent, node: QuestionFlowNode) => {
       const question = questions.find((item) => item.id === node.id);
       if (!question) return;
+      const questionIndex = questions.findIndex((item) => item.id === node.id);
+      const savedPosition = getBlueprintPosition(question, questionIndex);
       const position = {
         x: Math.max(0, Math.round(node.position.x)),
         y: Math.max(0, Math.round(node.position.y))
       };
-      updateQuestionMutateRef.current({ id: question.id, payload: { settings: withBlueprintPosition(getQuestionSettings(question), position) } });
+      setFlowNodes((nodes) => nodes.map((item) => (item.id === node.id ? { ...item, position } : item)));
+      setPendingNodePositions((current) => {
+        const next = { ...current };
+        if (savedPosition.x === position.x && savedPosition.y === position.y) delete next[question.id];
+        else next[question.id] = position;
+        return next;
+      });
     },
     [questions]
   );
@@ -798,9 +870,19 @@ export function SurveyBuilderPage() {
     if (!parsed) return;
     setSelectedRuleId(rule.id);
     openRuleModal(
-      { sourceQuestionId: parsed.sourceQuestionId, sourceKey: parsed.sourceKey, targetQuestionId: rule.target_question_id, operator: parsed.operator },
+      {
+        sourceQuestionId: parsed.sourceQuestionId,
+        sourceKey: parsed.sourceKey,
+        sourceValue: parsed.isAlways ? ALWAYS_OUTPUT_VALUE : (parsed.value as string | number | undefined),
+        targetQuestionId: rule.target_question_id,
+        operator: parsed.operator
+      },
       rule
     );
+  }
+
+  function saveSurveyChanges() {
+    saveSurveyLayout.mutate(pendingNodePositions);
   }
 
   return (
@@ -814,6 +896,14 @@ export function SurveyBuilderPage() {
           </Space>
         </div>
         <Space>
+          <Button
+            icon={<SaveOutlined />}
+            onClick={saveSurveyChanges}
+            loading={saveSurveyLayout.isPending}
+            disabled={!surveyId || pendingPositionCount === 0}
+          >
+            Save survey
+          </Button>
           <Button
             icon={<EyeInvisibleOutlined />}
             onClick={() => makeAnonymous.mutate()}
@@ -837,7 +927,10 @@ export function SurveyBuilderPage() {
                     <Button type="primary" icon={<PlusOutlined />} onClick={() => openQuestionModal()}>Add question</Button>
                     <Button icon={<LinkOutlined />} onClick={openDefaultRuleModal} disabled={questions.length < 2}>Add rule</Button>
                   </Space>
-                  <Typography.Text type="secondary">{questions.length} questions / {(data?.rules ?? []).length} rules</Typography.Text>
+                  <Space size={8}>
+                    {pendingPositionCount > 0 && <Tag color="orange">{pendingPositionCount} unsaved position{pendingPositionCount === 1 ? "" : "s"}</Tag>}
+                    <Typography.Text type="secondary">{questions.length} questions / {(data?.rules ?? []).length} rules</Typography.Text>
+                  </Space>
                 </div>
                 <div className="blueprint-workspace">
                   <ReactFlow<QuestionFlowNode, RuleFlowEdge>
@@ -961,7 +1054,14 @@ export function SurveyBuilderPage() {
                   </Form.List>
                 );
               }
-              if (type === "RATING") return <Form.Item name="max" label="Max score"><InputNumber min={2} max={20} /></Form.Item>;
+              if (type === "RATING") {
+                return (
+                  <>
+                    <Form.Item name="max" label="Max score"><InputNumber min={2} max={20} /></Form.Item>
+                    <Form.Item name="is_enps" label="eNPS question" valuePropName="checked"><Switch /></Form.Item>
+                  </>
+                );
+              }
               if (type === "MATRIX") {
                 return (
                   <>
