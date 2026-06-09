@@ -17,6 +17,40 @@ services:
     volumes:
       - .:/app
 
+  notification-worker:
+    build: .
+    container_name: pulsehr-notification-worker
+    env_file:
+      - .env
+    depends_on:
+      postgres:
+        condition: service_healthy
+      api:
+        condition: service_started
+      mailpit:
+        condition: service_started
+      sms-stub:
+        condition: service_started
+    command: python -m app.workers.notification_worker
+    volumes:
+      - .:/app
+
+  mailpit:
+    image: axllent/mailpit:latest
+    container_name: pulsehr-mailpit
+    ports:
+      - "8025:8025"
+      - "1025:1025"
+
+  sms-stub:
+    build: .
+    container_name: pulsehr-sms-stub
+    command: uvicorn app.workers.sms_stub:app --host 0.0.0.0 --port 8090 --reload
+    ports:
+      - "8090:8090"
+    volumes:
+      - .:/app
+
   postgres:
     image: postgres:16-alpine
     container_name: pulsehr-postgres

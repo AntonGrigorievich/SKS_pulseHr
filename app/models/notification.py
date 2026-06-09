@@ -4,7 +4,7 @@ import enum
 import uuid
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, Enum, ForeignKey, String, Text
+from sqlalchemy import Boolean, DateTime, Enum, ForeignKey, Integer, String, Text
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -20,8 +20,11 @@ class NotificationChannel(str, enum.Enum):
 
 class DeliveryStatus(str, enum.Enum):
     PENDING = "PENDING"
+    SENDING = "SENDING"
     SENT = "SENT"
     FAILED = "FAILED"
+    SKIPPED = "SKIPPED"
+    CANCELLED = "CANCELLED"
 
 
 class NotificationSettings(TimestampMixin, Base):
@@ -78,6 +81,8 @@ class Notification(TimestampMixin, Base):
     title: Mapped[str] = mapped_column(String(255), nullable=False)
     body: Mapped[str] = mapped_column(Text, nullable=False)
     payload: Mapped[dict] = mapped_column(JSONB, default=dict, nullable=False)
+    stop_on_success: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    step_delay_seconds: Mapped[int] = mapped_column(Integer, default=900, nullable=False)
 
     deliveries = relationship("NotificationDelivery", back_populates="notification")
 
@@ -108,8 +113,11 @@ class NotificationDelivery(TimestampMixin, Base):
         nullable=False,
     )
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    scheduled_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    attempt_order: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
+    destination: Mapped[str] = mapped_column(String(512), nullable=False)
+    provider_message_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
     sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     notification = relationship("Notification", back_populates="deliveries")
     user = relationship("User")
-

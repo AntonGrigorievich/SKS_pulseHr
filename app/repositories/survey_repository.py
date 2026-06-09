@@ -9,6 +9,7 @@ from sqlalchemy.orm import selectinload
 from app.models.question import Question, QuestionOption
 from app.models.survey import Survey, SurveyAssignment, SurveyStatus
 from app.models.survey_logic import SurveyRule
+from app.models.user import Role, User
 
 
 class SurveyRepository:
@@ -51,6 +52,26 @@ class SurveyRepository:
             .order_by(Survey.created_at.desc())
         )
         return list(result.scalars().unique().all())
+
+    async def list_publish_recipient_ids(
+        self,
+        session: AsyncSession,
+        survey_id: UUID,
+    ) -> list[UUID]:
+        assignment_result = await session.execute(
+            select(SurveyAssignment.user_id).where(SurveyAssignment.survey_id == survey_id)
+        )
+        assigned_user_ids = list(dict.fromkeys(assignment_result.scalars().all()))
+
+        stmt = select(User.id).where(
+            User.role == Role.EMPLOYEE,
+            User.is_active.is_(True),
+        )
+        if assigned_user_ids:
+            stmt = stmt.where(User.id.in_(assigned_user_ids))
+
+        result = await session.execute(stmt.order_by(User.created_at.desc()))
+        return list(result.scalars().all())
 
     async def list_rules(self, session: AsyncSession, survey_id: UUID) -> list[SurveyRule]:
         result = await session.execute(

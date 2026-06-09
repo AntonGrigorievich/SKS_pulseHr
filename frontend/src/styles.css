@@ -29,10 +29,59 @@ body {
   margin-bottom: 16px;
 }
 
+.survey-analytics-select {
+  min-width: 320px;
+}
+
 .analytics-layout {
   display: grid;
   grid-template-columns: minmax(0, 1.5fr) minmax(280px, 0.8fr);
   gap: 16px;
+}
+
+.survey-analytics-stat-grid {
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+}
+
+.survey-analytics-charts {
+  margin-top: 16px;
+}
+
+.answer-summary-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.answer-summary-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 260px;
+  padding: 3px 8px;
+  border: 1px solid #d9e2ef;
+  border-radius: 4px;
+  background: #f8fafc;
+}
+
+.answer-summary-item span:first-child {
+  overflow-wrap: anywhere;
+}
+
+.matrix-summary,
+.text-samples {
+  width: 100%;
+}
+
+.text-samples .ant-typography {
+  margin-bottom: 0;
+}
+
+.analytics-answer-text {
+  display: block;
+  max-width: 220px;
+  overflow-wrap: anywhere;
+  white-space: normal;
 }
 
 .question-row {
@@ -213,6 +262,11 @@ body {
 @media (max-width: 980px) {
   .analytics-layout {
     grid-template-columns: 1fr;
+  }
+
+  .survey-analytics-select {
+    width: 100%;
+    min-width: 0;
   }
 
   .blueprint-shell {

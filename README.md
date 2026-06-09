@@ -252,8 +252,11 @@ eNPS is calculated from rating answers where question settings contain:
 - `POST /notifications/subscriptions`
 - `POST /notifications/send`
 
-MVP notification sending writes delivery records and logs the delivery instead of calling
-real SMS, Telegram, Email, or Push providers.
+`POST /notifications/send` creates the notification and due delivery records only.
+`app.workers.notification_worker` sends due records through configured Telegram,
+Email, and SMS providers. Delivery scheduling is database-backed, supports ordered
+channel escalation/cascading, and cancels remaining survey reminders when the
+employee has already submitted the survey.
 
 ### Exports
 

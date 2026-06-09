@@ -52,8 +52,10 @@ class NotificationCreate(BaseModel):
     survey_id: UUID | None = None
     title: str = Field(min_length=1, max_length=255)
     body: str = Field(min_length=1)
-    user_ids: list[UUID]
-    channels: list[NotificationChannel]
+    user_ids: list[UUID] = Field(min_length=1)
+    channels: list[NotificationChannel] = Field(min_length=1)
+    step_delay_seconds: int | None = Field(default=None, ge=0)
+    stop_on_success: bool = True
     payload: dict = Field(default_factory=dict)
 
 
@@ -65,6 +67,10 @@ class NotificationDeliveryRead(BaseModel):
     user_id: UUID
     channel: NotificationChannel
     status: DeliveryStatus
+    scheduled_at: datetime
+    attempt_order: int
+    destination: str
+    provider_message_id: str | None
     error_message: str | None
     sent_at: datetime | None
     created_at: datetime

@@ -40,6 +40,7 @@ export function SurveyManagementPage() {
             render: (_value: unknown, record: Survey) => (
               <Space>
                 <Link to={`/hr/surveys/${record.id}/builder`}>Builder</Link>
+                <Link to={`/hr/analytics?surveyId=${record.id}`}>Analytics</Link>
                 <Button size="small" onClick={() => action.mutate({ id: record.id, name: "publish" })}>Publish</Button>
                 <Button size="small" onClick={() => action.mutate({ id: record.id, name: "close" })}>Close</Button>
                 <Button size="small" onClick={() => action.mutate({ id: record.id, name: "archive" })}>Archive</Button>

@@ -1,20 +1,43 @@
 from __future__ import annotations
 
+import logging
 from uuid import UUID
 
 from fastapi import HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.models.notification import NotificationChannel
 from app.models.survey import AssignmentStatus, Survey, SurveyAssignment, SurveyStatus
 from app.models.user import User
+from app.repositories.notification_repository import NotificationRepository
 from app.repositories.survey_repository import SurveyRepository
+from app.schemas.notification import NotificationCreate
 from app.schemas.survey import SurveyAssignmentCreate, SurveyCreate, SurveyUpdate
+from app.services.notification_service import NotificationService
+
+logger = logging.getLogger(__name__)
+
+
+PUBLISH_NOTIFICATION_CHANNELS = [
+    NotificationChannel.TELEGRAM,
+    NotificationChannel.EMAIL,
+    NotificationChannel.SMS,
+]
 
 
 class SurveyService:
-    def __init__(self, repository: SurveyRepository) -> None:
+    def __init__(
+        self,
+        repository: SurveyRepository,
+        notification_service: NotificationService | None = None,
+    ) -> None:
         self.repository = repository
+        self.notification_service = (
+            notification_service
+            if notification_service is not None
+            else NotificationService(NotificationRepository())
+        )
 
     async def create(self, session: AsyncSession, payload: SurveyCreate, current_user: User) -> Survey:
         survey = Survey(**payload.model_dump(), created_by_id=current_user.id)
@@ -45,8 +68,11 @@ class SurveyService:
         survey = await self.get(session, survey_id)
         if not survey.questions:
             raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Survey has no questions")
+        if survey.status == SurveyStatus.PUBLISHED:
+            return survey
+
         survey.status = SurveyStatus.PUBLISHED
-        await session.commit()
+        await self._schedule_publish_notifications(session, survey)
         await session.refresh(survey)
         return survey
 
@@ -124,7 +150,58 @@ class SurveyService:
             "completion_percent": completion_percent,
         }
 
+    async def _schedule_publish_notifications(
+        self,
+        session: AsyncSession,
+        survey: Survey,
+    ) -> None:
+        recipient_ids = await self.repository.list_publish_recipient_ids(session, survey.id)
+        if not recipient_ids:
+            logger.info(
+                "Survey %s published without active employee notification recipients",
+                survey.id,
+            )
+            await session.commit()
+            return
+
+        await self.notification_service.send(
+            session,
+            self._publish_notification_payload(survey, recipient_ids),
+        )
+
+    @staticmethod
+    def _publish_notification_payload(survey: Survey, user_ids: list[UUID]) -> NotificationCreate:
+        body_parts = [
+            f'A new survey "{survey.title}" is available.',
+            f"Estimated time: {survey.estimated_minutes} min.",
+        ]
+        if survey.description:
+            body_parts.insert(1, survey.description)
+        if survey.ends_at:
+            body_parts.append(f"Deadline: {survey.ends_at.isoformat()}.")
+
+        payload = {
+            "type": "SURVEY_PUBLISHED",
+            "survey_id": str(survey.id),
+        }
+        if survey.ends_at:
+            payload["ends_at"] = survey.ends_at.isoformat()
+
+        title = f"New survey: {survey.title}"
+        if len(title) > 255:
+            title = f"{title[:252]}..."
+
+        return NotificationCreate(
+            survey_id=survey.id,
+            title=title,
+            body="\n".join(body_parts),
+            user_ids=user_ids,
+            channels=PUBLISH_NOTIFICATION_CHANNELS,
+            step_delay_seconds=0,
+            stop_on_success=False,
+            payload=payload,
+        )
+
 
 def get_survey_service() -> SurveyService:
     return SurveyService(SurveyRepository())
-

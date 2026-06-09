@@ -33,6 +33,20 @@ class Settings(BaseSettings):
     otp_rate_limit_seconds: int = 60
     otp_max_verify_attempts: int = 5
 
+    telegram_bot_token: str | None = None
+
+    smtp_host: str | None = None
+    smtp_port: int = 587
+    smtp_user: str | None = None
+    smtp_password: str | None = None
+    email_from: str | None = None
+
+    sms_provider_url: str | None = None
+    sms_api_key: str | None = None
+    sms_sender: str | None = None
+
+    notification_step_delay_seconds: int = 900
+
     @cached_property
     def database_url(self) -> str:
         return (
