@@ -58,16 +58,21 @@ import {
 const QUESTION_TYPES: QuestionType[] = ["SINGLE_CHOICE", "MULTIPLE_CHOICE", "RATING", "TEXT", "MATRIX"];
 const RULE_ACTIONS = ["SHOW_QUESTION", "HIDE_QUESTION"] as const;
 const OPERATORS: BranchOperator[] = ["equals", "lte", "gte", "in"];
+const ALWAYS_CONDITION = "always";
+const ALWAYS_OUTPUT_KEY = "__always__";
+const ALWAYS_OUTPUT_VALUE = "__always__";
 const NODE_WIDTH = 300;
 const TARGET_HANDLE_ID = "question-input";
 const FLOW_FIT_VIEW_OPTIONS = { padding: 0.24 };
 const FLOW_SNAP_GRID: [number, number] = [20, 20];
 
 type RuleAction = (typeof RULE_ACTIONS)[number];
+type RuleConditionOperator = BranchOperator | typeof ALWAYS_CONDITION;
 type QuestionOutput = {
   key: string;
   label: string;
   value: string | number;
+  kind?: "always" | "answer";
 };
 type QuestionFormValues = {
   title: string;
@@ -81,26 +86,28 @@ type QuestionFormValues = {
 };
 type ConnectionDraft = {
   sourceQuestionId: string;
-  sourceKey: string;
+  sourceKey?: string;
   sourceValue?: string | number;
   targetQuestionId: string;
+  operator?: RuleConditionOperator;
 };
 type RuleFormValues = {
   sourceQuestionId: string;
-  sourceKey: string;
+  sourceKey?: string;
   target_question_id: string;
-  operator: BranchOperator;
-  value: string | number | Array<string | number>;
+  operator: RuleConditionOperator;
+  value?: string | number | Array<string | number> | boolean;
   action: RuleAction;
   priority: number;
   name?: string;
 };
 type ParsedRule = {
-  field: string;
+  field?: string;
   sourceQuestionId: string;
-  sourceKey: string;
-  operator: BranchOperator;
-  value: unknown;
+  sourceKey?: string;
+  operator: RuleConditionOperator;
+  value?: unknown;
+  isAlways: boolean;
 };
 type QuestionNodeData = {
   question: Question;
@@ -195,7 +202,10 @@ function QuestionFlowCard({ data, selected }: NodeProps<QuestionFlowNode>) {
       </div>
       <div className="rule-node-outputs">
         {data.outputs.map((output) => (
-          <div key={encodeOutputHandle(output)} className="rule-node-output">
+          <div
+            key={encodeOutputHandle(output)}
+            className={`rule-node-output ${output.kind === "always" ? "rule-node-output-always" : ""}`}
+          >
             <span>{output.label}</span>
             <Handle
               id={encodeOutputHandle(output)}
@@ -252,12 +262,20 @@ function normalizeOptions(values: QuestionFormValues): QuestionOption[] {
     }));
 }
 
-function getOutputKeys(question: Question): QuestionOutput[] {
+function getAlwaysOutput(): QuestionOutput {
+  return { key: ALWAYS_OUTPUT_KEY, label: "Always", value: ALWAYS_OUTPUT_VALUE, kind: "always" };
+}
+
+function getAnswerOutputs(question: Question): QuestionOutput[] {
   if (question.type === "SINGLE_CHOICE") return getQuestionOptions(question).map((option) => ({ key: "option", label: option.label, value: option.value }));
   if (question.type === "MULTIPLE_CHOICE") return getQuestionOptions(question).map((option) => ({ key: "options", label: option.label, value: option.value }));
   if (question.type === "RATING") return [{ key: "score", label: "Score", value: "" }];
   if (question.type === "MATRIX") return ((getQuestionSettings(question).rows as string[] | undefined) ?? []).map((row) => ({ key: `rows.${row}`, label: row, value: "" }));
   return [{ key: "text", label: "Text", value: "" }];
+}
+
+function getOutputKeys(question: Question): QuestionOutput[] {
+  return [getAlwaysOutput(), ...getAnswerOutputs(question)];
 }
 
 function getSourceFieldOptions(question: Question) {
@@ -266,7 +284,7 @@ function getSourceFieldOptions(question: Question) {
   if (question.type === "RATING") return [{ value: "score", label: "Rating score" }];
   if (question.type === "TEXT") return [{ value: "text", label: "Text response" }];
   const labels = new Map<string, string>();
-  for (const output of getOutputKeys(question)) {
+  for (const output of getAnswerOutputs(question)) {
     if (!labels.has(output.key)) labels.set(output.key, output.label);
   }
   return [...labels.entries()].map(([value, label]) => ({ value, label }));
@@ -284,12 +302,17 @@ function getValueOptions(question: Question | undefined, sourceKey: string | und
   return [];
 }
 
+function getDefaultSourceKey(question: Question | undefined) {
+  return question ? (getAnswerOutputs(question)[0]?.key ?? getSourceFieldOptions(question)[0]?.value ?? "text") : "text";
+}
+
 function getDefaultOperator(question: Question | undefined): BranchOperator {
   if (question?.type === "RATING") return "gte";
   return "equals";
 }
 
-function getDefaultRuleValue(question: Question | undefined, sourceKey: string, sourceValue?: string | number, operator: BranchOperator = "equals") {
+function getDefaultRuleValue(question: Question | undefined, sourceKey: string | undefined, sourceValue?: string | number, operator: RuleConditionOperator = "equals") {
+  if (operator === ALWAYS_CONDITION) return true;
   if (operator === "in") return sourceValue ? [sourceValue] : [];
   if (sourceValue !== undefined && sourceValue !== "") return sourceValue;
   if (question?.type === "RATING") return 1;
@@ -312,17 +335,20 @@ function decodeOutputHandle(handleId?: string | null): Pick<ConnectionDraft, "so
 }
 
 function getRuleSourceHandle(question: Question, parsed: ParsedRule) {
-  const outputs = getOutputKeys(question);
+  if (parsed.isAlways) return encodeOutputHandle(getAlwaysOutput());
+  const outputs = getAnswerOutputs(question);
+  const sourceKey = parsed.sourceKey ?? getDefaultSourceKey(question);
   const exactOutput = outputs.find((output) => output.key === parsed.sourceKey && valuesMatch(output.value, parsed.value));
-  const fieldOutput = outputs.find((output) => output.key === parsed.sourceKey);
-  return encodeOutputHandle(exactOutput ?? fieldOutput ?? { key: parsed.sourceKey, label: parsed.sourceKey, value: "" });
+  const fieldOutput = outputs.find((output) => output.key === sourceKey);
+  return encodeOutputHandle(exactOutput ?? fieldOutput ?? { key: sourceKey, label: sourceKey, value: "" });
 }
 
 function buildField(questionId: string, key: string) {
   return `answers.${questionId}.${key}`;
 }
 
-function normalizeRuleValue(operator: BranchOperator, value: RuleFormValues["value"]) {
+function normalizeRuleValue(operator: RuleConditionOperator, value: RuleFormValues["value"]) {
+  if (operator === ALWAYS_CONDITION) return true;
   if (operator === "in") {
     if (Array.isArray(value)) return value;
     return String(value)
@@ -349,17 +375,29 @@ function withBlueprintPosition(settings: Record<string, unknown>, position: Blue
 
 function parseRule(rule: SurveyRule): ParsedRule | null {
   const conditions = (rule.condition.conditions as Record<string, unknown>[] | undefined) ?? [];
+  const sourceQuestionId = rule.condition.source_question_id;
+  const isAlwaysCondition = rule.condition.mode === ALWAYS_CONDITION || rule.condition.op === "ALWAYS";
+  if (isAlwaysCondition && typeof sourceQuestionId === "string") {
+    return {
+      sourceQuestionId,
+      sourceKey: ALWAYS_OUTPUT_KEY,
+      operator: ALWAYS_CONDITION,
+      value: true,
+      isAlways: true
+    };
+  }
   const condition = conditions.find((item) => typeof item.field === "string" && String(item.field).startsWith("answers."));
   if (!condition || typeof condition.field !== "string" || typeof condition.operator !== "string") return null;
-  const [, sourceQuestionId, ...keyParts] = condition.field.split(".");
-  if (!sourceQuestionId || keyParts.length === 0) return null;
+  const [, conditionSourceQuestionId, ...keyParts] = condition.field.split(".");
+  if (!conditionSourceQuestionId || keyParts.length === 0) return null;
   if (!OPERATORS.includes(condition.operator as BranchOperator)) return null;
   return {
     field: condition.field,
-    sourceQuestionId,
+    sourceQuestionId: conditionSourceQuestionId,
     sourceKey: keyParts.join("."),
     operator: condition.operator as BranchOperator,
-    value: condition.value
+    value: condition.value,
+    isAlways: false
   };
 }
 
@@ -367,7 +405,8 @@ function actionLabel(action: RuleAction) {
   return action === "SHOW_QUESTION" ? "Show" : "Hide";
 }
 
-function operatorLabel(operator: BranchOperator) {
+function operatorLabel(operator: RuleConditionOperator) {
+  if (operator === ALWAYS_CONDITION) return "always";
   if (operator === "equals") return "is";
   if (operator === "in") return "is one of";
   if (operator === "gte") return "is at least";
@@ -383,10 +422,12 @@ function formatRuleValue(value: unknown) {
 function formatRuleName(questions: Question[], values: RuleFormValues) {
   const source = questions.find((question) => question.id === values.sourceQuestionId);
   const target = questions.find((question) => question.id === values.target_question_id);
+  if (values.operator === ALWAYS_CONDITION) return `${actionLabel(values.action)} "${target?.title ?? "target"}" after "${source?.title ?? "source"}"`;
   return `${actionLabel(values.action)} "${target?.title ?? "target"}" when "${source?.title ?? "source"}" ${operatorLabel(values.operator)} "${formatRuleValue(values.value)}"`;
 }
 
 function formatEdgeLabel(rule: SurveyRule, parsed: ParsedRule) {
+  if (parsed.isAlways) return `${actionLabel(rule.action)} always`;
   return `${actionLabel(rule.action)} if ${operatorLabel(parsed.operator)} ${formatRuleValue(parsed.value)}`;
 }
 
@@ -395,6 +436,7 @@ function formatRuleSummary(questions: Question[], rule: SurveyRule) {
   if (!parsed) return rule.name;
   const source = questions.find((question) => question.id === parsed.sourceQuestionId);
   const target = questions.find((question) => question.id === rule.target_question_id);
+  if (parsed.isAlways) return `${actionLabel(rule.action)} "${target?.title ?? "target"}" after "${source?.title ?? "source"}"`;
   return `${actionLabel(rule.action)} "${target?.title ?? "target"}" when "${source?.title ?? "source"}" ${operatorLabel(parsed.operator)} ${formatRuleValue(parsed.value)}`;
 }
 
@@ -632,12 +674,13 @@ export function SurveyBuilderPage() {
       message.info("Add at least two questions before creating a rule");
       return;
     }
-    const output = getOutputKeys(source)[0];
+    const output = getAlwaysOutput();
     openRuleModal({
       sourceQuestionId: source.id,
-      sourceKey: output?.key ?? getSourceFieldOptions(source)[0]?.value ?? "text",
-      sourceValue: output?.value,
-      targetQuestionId: target.id
+      sourceKey: output.key,
+      sourceValue: output.value,
+      targetQuestionId: target.id,
+      operator: ALWAYS_CONDITION
     });
   }
 
@@ -650,11 +693,13 @@ export function SurveyBuilderPage() {
       message.error("Choose an answer output before connecting a rule");
       return;
     }
+    const sourceKey = decoded?.sourceKey ?? fallbackOutput?.key;
     openRuleModal({
       sourceQuestionId: connection.source,
-      sourceKey: decoded?.sourceKey ?? fallbackOutput?.key ?? "text",
+      sourceKey: sourceKey ?? getDefaultSourceKey(source),
       sourceValue: decoded?.sourceValue ?? fallbackOutput?.value,
-      targetQuestionId: connection.target
+      targetQuestionId: connection.target,
+      operator: sourceKey === ALWAYS_OUTPUT_KEY ? ALWAYS_CONDITION : undefined
     });
   }
 
@@ -672,15 +717,16 @@ export function SurveyBuilderPage() {
       ? getOutputKeys(source).find((item) => item.key === draft.sourceKey && item.value === draft.sourceValue)
       : undefined;
     const parsed = rule ? parseRule(rule) : null;
-    const operator = parsed?.operator ?? getDefaultOperator(source);
+    const operator = parsed?.operator ?? draft.operator ?? (draft.sourceKey === ALWAYS_OUTPUT_KEY ? ALWAYS_CONDITION : getDefaultOperator(source));
+    const sourceKey = operator === ALWAYS_CONDITION ? ALWAYS_OUTPUT_KEY : draft.sourceKey ?? getDefaultSourceKey(source);
     setEditingRule(rule ?? null);
     setConnectionDraft(draft);
     ruleForm.setFieldsValue({
       sourceQuestionId: draft.sourceQuestionId,
-      sourceKey: draft.sourceKey,
+      sourceKey,
       target_question_id: draft.targetQuestionId,
       operator,
-      value: (parsed?.value as RuleFormValues["value"] | undefined) ?? getDefaultRuleValue(source, draft.sourceKey, output?.value ?? draft.sourceValue, operator),
+      value: (parsed?.value as RuleFormValues["value"] | undefined) ?? getDefaultRuleValue(source, sourceKey, output?.value ?? draft.sourceValue, operator),
       action: rule?.action ?? "SHOW_QUESTION",
       priority: rule?.priority ?? 100,
       name: rule?.name
@@ -697,13 +743,23 @@ export function SurveyBuilderPage() {
       message.error("Rule questions must belong to this survey");
       return;
     }
-    const field = buildField(values.sourceQuestionId, values.sourceKey);
+    const isAlwaysRule = values.operator === ALWAYS_CONDITION;
+    const field = isAlwaysRule ? undefined : buildField(values.sourceQuestionId, values.sourceKey ?? getDefaultSourceKey(questions.find((question) => question.id === values.sourceQuestionId)));
     const ruleValue = normalizeRuleValue(values.operator, values.value);
     const duplicate = (data?.rules ?? []).find((rule) => {
       if (editingRule?.id === rule.id) return false;
       const parsed = parseRule(rule);
+      if (isAlwaysRule) {
+        return (
+          parsed?.isAlways &&
+          parsed.sourceQuestionId === values.sourceQuestionId &&
+          rule.target_question_id === values.target_question_id &&
+          rule.action === values.action
+        );
+      }
+      if (!parsed) return false;
       return (
-        parsed?.field === field &&
+        parsed.field === field &&
         parsed.operator === values.operator &&
         valuesMatch(parsed.value, ruleValue) &&
         rule.target_question_id === values.target_question_id &&
@@ -719,7 +775,9 @@ export function SurveyBuilderPage() {
       name: values.name?.trim() || formatRuleName(questions, values),
       priority: Number(values.priority ?? 100),
       action: values.action,
-      condition: { op: "AND", conditions: [{ field, operator: values.operator, value: ruleValue }] }
+      condition: isAlwaysRule
+        ? { op: "AND", mode: ALWAYS_CONDITION, source_question_id: values.sourceQuestionId, conditions: [] }
+        : { op: "AND", conditions: [{ field, operator: values.operator, value: ruleValue }] }
     };
     if (editingRule) updateRule.mutate({ id: editingRule.id, payload });
     else createRule.mutate(payload);
@@ -730,7 +788,7 @@ export function SurveyBuilderPage() {
     if (!parsed) return;
     setSelectedRuleId(rule.id);
     openRuleModal(
-      { sourceQuestionId: parsed.sourceQuestionId, sourceKey: parsed.sourceKey, targetQuestionId: rule.target_question_id },
+      { sourceQuestionId: parsed.sourceQuestionId, sourceKey: parsed.sourceKey, targetQuestionId: rule.target_question_id, operator: parsed.operator },
       rule
     );
   }
@@ -917,9 +975,10 @@ export function SurveyBuilderPage() {
               options={questions.map((question) => ({ value: question.id, label: question.title }))}
               onChange={(questionId) => {
                 const source = questions.find((question) => question.id === questionId);
-                const output = source ? getOutputKeys(source)[0] : undefined;
-                const sourceKey = output?.key ?? (source ? getSourceFieldOptions(source)[0]?.value : undefined) ?? "text";
-                const operator = getDefaultOperator(source);
+                const currentOperator = (ruleForm.getFieldValue("operator") as RuleConditionOperator | undefined) ?? ALWAYS_CONDITION;
+                const operator = currentOperator === ALWAYS_CONDITION ? ALWAYS_CONDITION : getDefaultOperator(source);
+                const output = operator === ALWAYS_CONDITION ? getAlwaysOutput() : source ? getAnswerOutputs(source)[0] : undefined;
+                const sourceKey = operator === ALWAYS_CONDITION ? ALWAYS_OUTPUT_KEY : output?.key ?? getDefaultSourceKey(source);
                 ruleForm.setFieldsValue({
                   sourceKey,
                   operator,
@@ -928,15 +987,17 @@ export function SurveyBuilderPage() {
               }}
             />
           </Form.Item>
-          <Form.Item shouldUpdate={(prev, next) => prev.sourceQuestionId !== next.sourceQuestionId}>
+          <Form.Item shouldUpdate={(prev, next) => prev.sourceQuestionId !== next.sourceQuestionId || prev.operator !== next.operator}>
             {({ getFieldValue }) => {
+              const operator = (getFieldValue("operator") as RuleConditionOperator | undefined) ?? ALWAYS_CONDITION;
+              if (operator === ALWAYS_CONDITION) return null;
               const source = questions.find((question) => question.id === getFieldValue("sourceQuestionId"));
               return (
                 <Form.Item name="sourceKey" label="Answer field" rules={[{ required: true }]}>
                   <Select
                     options={source ? getSourceFieldOptions(source) : []}
                     onChange={(sourceKey) => {
-                      const operator = (ruleForm.getFieldValue("operator") as BranchOperator | undefined) ?? getDefaultOperator(source);
+                      const operator = (ruleForm.getFieldValue("operator") as RuleConditionOperator | undefined) ?? getDefaultOperator(source);
                       ruleForm.setFieldsValue({ value: getDefaultRuleValue(source, sourceKey, undefined, operator) });
                     }}
                   />
@@ -946,15 +1007,28 @@ export function SurveyBuilderPage() {
           </Form.Item>
           <Form.Item name="operator" label="Condition" rules={[{ required: true }]}>
             <Select
-              options={OPERATORS.map((value) => ({ value, label: operatorLabel(value) }))}
-              onChange={(operator) => {
+              options={[
+                { value: ALWAYS_CONDITION, label: "No rule (always true)" },
+                ...OPERATORS.map((value) => ({ value, label: operatorLabel(value) }))
+              ]}
+              onChange={(operator: RuleConditionOperator) => {
+                const source = questions.find((question) => question.id === ruleForm.getFieldValue("sourceQuestionId"));
+                if (operator === ALWAYS_CONDITION) {
+                  ruleForm.setFieldsValue({ sourceKey: ALWAYS_OUTPUT_KEY, value: true });
+                  return;
+                }
                 const value = ruleForm.getFieldValue("value") as RuleFormValues["value"] | undefined;
+                const currentSourceKey = ruleForm.getFieldValue("sourceKey") as string | undefined;
+                const sourceKey = currentSourceKey && currentSourceKey !== ALWAYS_OUTPUT_KEY ? currentSourceKey : getDefaultSourceKey(source);
                 if (operator === "in" && value !== undefined && !Array.isArray(value)) {
-                  ruleForm.setFieldsValue({ value: value === "" ? [] : [value] });
+                  ruleForm.setFieldsValue({ sourceKey, value: typeof value === "boolean" || value === "" ? [] : [value] });
+                  return;
                 }
                 if (operator !== "in" && Array.isArray(value)) {
-                  ruleForm.setFieldsValue({ value: value[0] ?? "" });
+                  ruleForm.setFieldsValue({ sourceKey, value: value[0] ?? getDefaultRuleValue(source, sourceKey, undefined, operator) });
+                  return;
                 }
+                ruleForm.setFieldsValue({ sourceKey, value: value === true ? getDefaultRuleValue(source, sourceKey, undefined, operator) : value });
               }}
             />
           </Form.Item>
@@ -962,7 +1036,8 @@ export function SurveyBuilderPage() {
             {({ getFieldValue }) => {
               const source = questions.find((question) => question.id === getFieldValue("sourceQuestionId"));
               const sourceKey = getFieldValue("sourceKey") as string | undefined;
-              const operator = (getFieldValue("operator") as BranchOperator | undefined) ?? "equals";
+              const operator = (getFieldValue("operator") as RuleConditionOperator | undefined) ?? ALWAYS_CONDITION;
+              if (operator === ALWAYS_CONDITION) return null;
               const valueOptions = getValueOptions(source, sourceKey);
               if (operator === "in" && valueOptions.length > 0) {
                 return (

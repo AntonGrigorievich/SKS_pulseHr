@@ -25,6 +25,7 @@ function compare(actual: unknown, operator: string, expected: unknown): boolean 
 
 function evaluate(condition: Record<string, unknown>, context: Record<string, unknown>): boolean {
   const op = condition.op;
+  if (op === "ALWAYS" || condition.mode === "always") return true;
   const conditions = (condition.conditions as Record<string, unknown>[] | undefined) ?? [];
   if (op === "AND") return conditions.every((item) => evaluate(item, context));
   if (op === "OR") return conditions.some((item) => evaluate(item, context));

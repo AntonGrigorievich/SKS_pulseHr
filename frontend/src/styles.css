@@ -148,6 +148,13 @@ body {
   font-size: 13px;
 }
 
+.rule-node-output-always {
+  border-color: #a7d1b7;
+  background: #f1fbf4;
+  color: #1d5f39;
+  font-weight: 600;
+}
+
 .rule-node-output span {
   overflow: hidden;
   text-overflow: ellipsis;
